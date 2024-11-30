@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 # Database connection
 class DatabaseConnection:
     def __init__(self):
-        self.server = 'DESKTOP-G8KFEG6\\MYSQLSERVER1'
-        self.database = 'db_project'
+        self.server = 'HARIS'
+        self.database = 'final_project'
         self.connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={self.server};DATABASE={self.database};Trusted_Connection=yes;'
 
     def get_connection(self):
@@ -172,8 +172,18 @@ class UpdateInventoryScreen(QtWidgets.QMainWindow):
         super().__init__()
         uic.loadUi('screens/update inventory.ui', self)
         self.admin_email = admin_email
+        self.setup_ui()
         self.load_inventory()
-        self.setup_connections()
+
+    def setup_ui(self):
+        # Setup table properties
+        self.tableWidget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tableWidget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        
+        # Connect buttons
+        self.pushButton.clicked.connect(self.add_new_product)  # Add new product
+        self.pushButton_2.clicked.connect(self.delete_product)  # Delete product
+        self.pushButton_3.clicked.connect(self.close)  # OK/Close button
 
     def load_inventory(self):
         db = DatabaseConnection()
@@ -181,28 +191,116 @@ class UpdateInventoryScreen(QtWidgets.QMainWindow):
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM Inventory")
         
-        self.inventoryTable.clearContents()
+        self.tableWidget.clearContents()
+        self.tableWidget.setRowCount(0)
+        
         for row_index, row_data in enumerate(cursor.fetchall()):
-            self.inventoryTable.insertRow(row_index)
+            self.tableWidget.insertRow(row_index)
             for col_index, cell_data in enumerate(row_data):
-                self.inventoryTable.setItem(row_index, col_index, 
-                                         QTableWidgetItem(str(cell_data)))
+                self.tableWidget.setItem(row_index, col_index, 
+                                    QTableWidgetItem(str(cell_data)))
         conn.close()
 
     def add_new_product(self):
-        dialog = AddProductDialog()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add New Product")
+        dialog.setModal(True)
+        
+        # Create form layout
+        layout = QFormLayout(dialog)
+        
+        # Add input fields
+        name_input = QLineEdit()
+        qty_input = QSpinBox()
+        qty_input.setMaximum(1000)
+        price_input = QDoubleSpinBox()
+        price_input.setMaximum(10000.00)
+        category_input = QLineEdit()
+        desc_input = QTextEdit()
+        exp_date_input = QDateEdit()
+        exp_date_input.setCalendarPopup(True)
+        exp_date_input.setDate(QDate.currentDate().addYears(1))
+        
+        # Add fields to layout
+        layout.addRow("Product Name:", name_input)
+        layout.addRow("Quantity:", qty_input)
+        layout.addRow("Unit Price:", price_input)
+        layout.addRow("Category:", category_input)
+        layout.addRow("Description:", desc_input)
+        layout.addRow("Expiration Date:", exp_date_input)
+        
+        # Add buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | 
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Add product logic here
-            pass
+            try:
+                db = DatabaseConnection()
+                conn = db.get_connection()
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT INTO Inventory (Product_name, quantity_in_stock, description, 
+                                        unit_price, category, expiration_date)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    name_input.text(),
+                    qty_input.value(),
+                    desc_input.toPlainText(),
+                    price_input.value(),
+                    category_input.text(),
+                    exp_date_input.date().toString("yyyy-MM-dd")
+                ))
+                
+                cursor.execute("""
+                    INSERT INTO Manages (Admin_email, Product_id)
+                    VALUES (?, SCOPE_IDENTITY())
+                """, (self.admin_email,))
+                
+                conn.commit()
+                conn.close()
+                
+                self.load_inventory()  # Refresh the table
+                QMessageBox.information(self, "Success", "Product added successfully")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to add product: {str(e)}")
 
-    def edit_product(self):
-        selected_row = self.inventoryTable.currentRow()
-        if selected_row >= 0:
-            product_id = self.inventoryTable.item(selected_row, 0).text()
-            dialog = EditProductDialog(product_id)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Edit product logic here
-                pass
+    def delete_product(self):
+        selected_row = self.tableWidget.currentRow()
+        if selected_row < 0:
+            QMessageBox.warning(self, "Warning", "Please select a product to delete")
+            return
+            
+        product_id = self.tableWidget.item(selected_row, 0).text()
+        product_name = self.tableWidget.item(selected_row, 1).text()
+        
+        reply = QMessageBox.question(self, "Confirm Delete",
+                                   f"Are you sure you want to delete {product_name}?",
+                                   QMessageBox.StandardButton.Yes | 
+                                   QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                db = DatabaseConnection()
+                conn = db.get_connection()
+                cursor = conn.cursor()
+                
+                # Delete related records first
+                cursor.execute("DELETE FROM Manages WHERE Product_id = ?", (product_id,))
+                cursor.execute("DELETE FROM Inventory WHERE Product_id = ?", (product_id,))
+                
+                conn.commit()
+                conn.close()
+                
+                self.load_inventory()  # Refresh the table
+                QMessageBox.information(self, "Success", "Product deleted successfully")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete product: {str(e)}")
 
 # Order management screens
 class UpdateOrderStatusScreen(QtWidgets.QMainWindow):
@@ -210,42 +308,84 @@ class UpdateOrderStatusScreen(QtWidgets.QMainWindow):
         super().__init__()
         uic.loadUi('screens/update order status.ui', self)
         self.admin_email = admin_email
+        self.setup_ui()
         self.load_orders()
-        self.setup_connections()
+
+    def setup_ui(self):
+        # Set up status combo box options
+        self.comboBox.addItems(['Pending', 'Processing', 'Shipped', 'Delivered'])
+        # Connect buttons
+        self.pushButton.clicked.connect(self.update_order_status)  # OK button
+        # Setup date picker
+        self.dateEdit.setCalendarPopup(True)
+        self.dateEdit.setDate(QDate.currentDate().addDays(2))  # Default to 2 days from now
+        # Setup table widget
+        self.tableWidget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tableWidget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tableWidget.itemSelectionChanged.connect(self.on_order_selected)
+
+    def on_order_selected(self):
+        selected_row = self.tableWidget.currentRow()
+        if selected_row >= 0:
+            # Update fields with selected order details
+            order_id = self.tableWidget.item(selected_row, 0).text()
+            status = self.tableWidget.item(selected_row, 1).text()
+            delivery_date = self.tableWidget.item(selected_row, 3).text()
+            
+            self.lineEdit.setText(order_id)  # Order number
+            self.comboBox.setCurrentText(status)  # Current status
+            try:
+                # Convert delivery date string to QDate
+                date = QDate.fromString(delivery_date, "yyyy-MM-dd")
+                self.dateEdit.setDate(date)
+            except:
+                self.dateEdit.setDate(QDate.currentDate().addDays(2))
 
     def load_orders(self):
         db = DatabaseConnection()
         conn = db.get_connection()
         cursor = conn.cursor()
+        
         cursor.execute("""
             SELECT o.Order_id, o.Order_status, o.Order_date, 
-                   o.estimated_delivery_date, c.Customer_name
+                   o.estimated_delivery_date, c.Customer_name,
+                   i.Product_name, isc.item_quantity, i.unit_price,
+                   i.description, i.expiration_date
             FROM Orders o
             JOIN Customer c ON o.Customer_email = c.Customer_email
+            JOIN Shopping_cart sc ON o.Order_id = sc.OrderID
+            JOIN Inventory_to_Shopping_Cart isc ON sc.shopping_cart_ID = isc.shopping_cart_ID
+            JOIN Inventory i ON isc.product_ID = i.Product_id
         """)
         
-        self.ordersTable.clearContents()
+        self.tableWidget.clearContents()
+        self.tableWidget.setRowCount(0)
         for row_index, row_data in enumerate(cursor.fetchall()):
-            self.ordersTable.insertRow(row_index)
+            self.tableWidget.insertRow(row_index)
             for col_index, cell_data in enumerate(row_data):
-                self.ordersTable.setItem(row_index, col_index, 
+                self.tableWidget.setItem(row_index, col_index, 
                                        QTableWidgetItem(str(cell_data)))
         conn.close()
 
     def update_order_status(self):
-        selected_row = self.ordersTable.currentRow()
-        if selected_row >= 0:
-            order_id = self.ordersTable.item(selected_row, 0).text()
-            new_status = self.statusCombo.currentText()
+        order_id = self.lineEdit.text()
+        new_status = self.comboBox.currentText()
+        new_delivery_date = self.dateEdit.date().toString("yyyy-MM-dd")
+        
+        if not order_id:
+            QMessageBox.warning(self, "Error", "Please select an order first")
+            return
             
+        try:
             db = DatabaseConnection()
             conn = db.get_connection()
             cursor = conn.cursor()
+            
             cursor.execute("""
                 UPDATE Orders 
-                SET Order_status = ?
+                SET Order_status = ?, estimated_delivery_date = ?
                 WHERE Order_id = ?
-            """, (new_status, order_id))
+            """, (new_status, new_delivery_date, order_id))
             
             cursor.execute("""
                 INSERT INTO Updates (Admin_email, Order_id)
@@ -254,7 +394,12 @@ class UpdateOrderStatusScreen(QtWidgets.QMainWindow):
             
             conn.commit()
             conn.close()
+            
+            QMessageBox.information(self, "Success", "Order status updated successfully")
             self.load_orders()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to update order: {str(e)}")
 
 # Customer order-related screens
 class OrderScreen(QtWidgets.QMainWindow):
@@ -262,8 +407,17 @@ class OrderScreen(QtWidgets.QMainWindow):
         super().__init__()
         uic.loadUi('screens/order.ui', self)
         self.customer_email = customer_email
-        self.load_products()
+        # Remove this line since productsTable already exists from the UI
+        # self.productsTable = self.tableWidget
+        
+        # Add quantity spinbox
+        self.quantitySpinBox = QSpinBox(self)
+        self.quantitySpinBox.setMinimum(1)
+        self.quantitySpinBox.setMaximum(100)
+        self.quantitySpinBox.setGeometry(430, 320, 50, 21)
+        
         self.setup_connections()
+        self.load_products()  # Move this after setup is complete
 
     def setup_connections(self):
         self.pushButton.clicked.connect(self.search_products)  # Search button
@@ -281,6 +435,8 @@ class OrderScreen(QtWidgets.QMainWindow):
         cursor.execute("SELECT * FROM Inventory WHERE quantity_in_stock > 0")
         
         self.productsTable.clearContents()
+        self.productsTable.setRowCount(0)  # Reset row count
+        
         for row_index, row_data in enumerate(cursor.fetchall()):
             self.productsTable.insertRow(row_index)
             for col_index, cell_data in enumerate(row_data):
@@ -293,19 +449,33 @@ class OrderScreen(QtWidgets.QMainWindow):
         if selected_row >= 0:
             product_id = self.productsTable.item(selected_row, 0).text()
             quantity = self.quantitySpinBox.value()
+            unit_price = float(self.productsTable.item(selected_row, 4).text())
             
-            db = DatabaseConnection()
-            conn = db.get_connection()
-            cursor = conn.cursor()
-            
-            # Add to cart logic here
-            cursor.execute("""
-                INSERT INTO Shopping_cart (Customer_email, Product_id, Quantity)
-                VALUES (?, ?, ?)
-            """, (self.customer_email, product_id, quantity))
-            
-            conn.commit()
-            conn.close()
+            try:
+                db = DatabaseConnection()
+                conn = db.get_connection()
+                cursor = conn.cursor()
+                
+                # Create new shopping cart
+                cursor.execute("""
+                    INSERT INTO Shopping_cart (OrderID) 
+                    VALUES (NULL)
+                """)
+                cursor.execute("SELECT @@IDENTITY")
+                cart_id = cursor.fetchone()[0]
+                
+                # Add items to cart
+                cursor.execute("""
+                    INSERT INTO Inventory_to_Shopping_Cart (product_ID, shopping_cart_ID, item_quantity, Price)
+                    VALUES (?, ?, ?, ?)
+                """, (product_id, cart_id, quantity, unit_price * quantity))
+                
+                conn.commit()
+                conn.close()
+                
+                QMessageBox.information(self, "Success", "Item added to cart")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to add item: {str(e)}")
 
     def search_products(self):
         search_text = self.lineEdit.text().strip()
@@ -334,6 +504,7 @@ class CartScreen(QtWidgets.QMainWindow):
         super().__init__()
         uic.loadUi('screens/cart.ui', self)
         self.customer_email = customer_email
+         # Add this line to map the widget
         self.load_cart()
         self.setup_connections()
 
@@ -342,11 +513,13 @@ class CartScreen(QtWidgets.QMainWindow):
         conn = db.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT i.Product_id, i.Product_name, sc.Quantity, 
-                   i.unit_price, (sc.Quantity * i.unit_price) as Total
+            SELECT i.Product_id, i.Product_name, isc.item_quantity, 
+                   i.unit_price, (isc.item_quantity * i.unit_price) as Total
             FROM Shopping_cart sc
-            JOIN Inventory i ON sc.Product_id = i.Product_id
-            WHERE sc.Customer_email = ?
+            JOIN Inventory_to_Shopping_Cart isc ON sc.shopping_cart_ID = isc.shopping_cart_ID
+            JOIN Inventory i ON isc.product_ID = i.Product_id
+            JOIN Orders o ON sc.OrderID = o.Order_id
+            WHERE o.Customer_email = ?
         """, (self.customer_email,))
         
         self.cartTable.clearContents()
@@ -375,9 +548,14 @@ class CartScreen(QtWidgets.QMainWindow):
                 conn = db.get_connection()
                 cursor = conn.cursor()
                 cursor.execute("""
-                    DELETE FROM Shopping_cart 
-                    WHERE Customer_email = ? AND Product_id = ?
-                """, (self.customer_email, product_id))
+                    DELETE FROM Inventory_to_Shopping_Cart 
+                    WHERE product_ID = ? AND shopping_cart_ID IN (
+                        SELECT sc.shopping_cart_ID 
+                        FROM Shopping_cart sc
+                        JOIN Orders o ON sc.OrderID = o.Order_id
+                        WHERE o.Customer_email = ?
+                    )
+                """, (product_id, self.customer_email))
                 
                 conn.commit()
                 conn.close()
@@ -391,7 +569,15 @@ class OrderTrackingScreen(QtWidgets.QMainWindow):
         super().__init__()
         uic.loadUi('screens/orderstatus.ui', self)
         self.customer_email = customer_email
+        self.setup_ui()
         self.load_orders()
+
+    def setup_ui(self):
+        # Match widgets from orderstatus.ui
+        self.pushButton.clicked.connect(self.close)  # Close button
+        self.lineEdit.setEnabled(False)  # Order ID field
+        self.lineEdit_2.setEnabled(False)  # Expected delivery date field
+        self.comboBox.setEnabled(False)  # Status combobox
 
     def load_orders(self):
         db = DatabaseConnection()
@@ -403,13 +589,14 @@ class OrderTrackingScreen(QtWidgets.QMainWindow):
             FROM Orders o
             WHERE o.Customer_email = ?
         """, (self.customer_email,))
-        
-        self.ordersTable.clearContents()
-        for row_index, row_data in enumerate(cursor.fetchall()):
-            self.ordersTable.insertRow(row_index)
-            for col_index, cell_data in enumerate(row_data):
-                self.ordersTable.setItem(row_index, col_index, 
-                                      QTableWidgetItem(str(cell_data)))
+
+        result = cursor.fetchone()
+        if result:
+            # Display the most recent order details
+            self.lineEdit.setText(str(result[0]))  # Order ID
+            self.comboBox.addItem(str(result[1]))  # Status
+            self.lineEdit_2.setText(str(result[3]))  # Expected delivery date
+
         conn.close()
 
 # Add this class before the main() function
@@ -554,3 +741,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+    main()
+

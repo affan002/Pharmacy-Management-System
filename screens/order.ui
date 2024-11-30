@@ -37,7 +37,7 @@
      <string>Search</string>
     </property>
    </widget>
-   <widget class="QTableWidget" name="tableWidget">
+   <widget class="QTableWidget" name="productsTable">
     <property name="geometry">
      <rect>
       <x>80</x>

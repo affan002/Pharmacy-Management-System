@@ -16,7 +16,7 @@ CREATE TABLE Customer (
 );
 
 CREATE TABLE Inventory (
-    Product_id INT PRIMARY KEY,
+    Product_id INT IDENTITY(1,1) PRIMARY KEY,
     Product_name VARCHAR(255),
     quantity_in_stock INT,
     description TEXT,
@@ -25,15 +25,13 @@ CREATE TABLE Inventory (
     expiration_date DATETIME
 );
 
-
-
 CREATE TABLE Payment (
-    Payment_id INT PRIMARY KEY,
+    Payment_id INT IDENTITY(1,1) PRIMARY KEY,
     Total_amount DECIMAL(10,2)
 );
 
 CREATE TABLE Orders (
-    Order_id INT PRIMARY KEY,
+    Order_id INT IDENTITY(1,1) PRIMARY KEY,
     Order_status VARCHAR(255),
     Order_date DATE,
     estimated_delivery_date DATETIME,
@@ -45,7 +43,7 @@ CREATE TABLE Orders (
 
 -- Modified Shopping_cart table with foreign key to Orders
 CREATE TABLE Shopping_cart (
-    shopping_cart_ID INT PRIMARY KEY,
+    shopping_cart_ID INT IDENTITY(1,1) PRIMARY KEY,
     OrderID INT,
     FOREIGN KEY (OrderID) REFERENCES Orders(Order_id)
 );
@@ -104,56 +102,56 @@ INSERT INTO Customer VALUES
 ('jack@email.com', 'Jack Thompson', 'passjkl', '753 Oak Ct, Springs', '012-345-6789');
 
 -- Inventory data
-INSERT INTO Inventory VALUES
-(1, 'Paracetamol', 100, 'Pain relief tablets', 5.99, 'Pain Relief', '2025-12-31 00:00:00'),
-(2, 'Ibuprofen', 150, 'Anti-inflammatory medication', 6.99, 'Pain Relief', '2025-10-31 00:00:00'),
-(3, 'Amoxicillin', 80, 'Antibiotic capsules', 12.99, 'Antibiotics', '2025-09-30 00:00:00'),
-(4, 'Vitamin C', 200, 'Immune support supplement', 8.99, 'Vitamins', '2026-01-31 00:00:00'),
-(5, 'Calcium', 120, 'Bone health supplement', 9.99, 'Minerals', '2026-03-31 00:00:00'),
-(6, 'Aspirin', 120, 'Blood thinner medication', 7.99, 'Pain Relief', '2025-06-30 00:00:00'),
-(7, 'Cetirizine', 90, 'Antihistamine tablets', 15.99, 'Allergy', '2025-08-31 00:00:00'),
-(8, 'Omeprazole', 60, 'Acid reflux medication', 19.99, 'Digestive Health', '2025-07-31 00:00:00'),
-(9, 'Vitamin D3', 200, 'Bone health supplement', 11.99, 'Vitamins', '2026-06-30 00:00:00'),
-(10, 'Zinc tablets', 180, 'Immune support mineral', 13.99, 'Minerals', '2026-09-30 00:00:00');
+INSERT INTO Inventory (Product_name, quantity_in_stock, description, unit_price, category, expiration_date) VALUES
+('Paracetamol', 100, 'Pain relief tablets', 5.99, 'Pain Relief', '2025-12-31 00:00:00'),
+('Ibuprofen', 150, 'Anti-inflammatory medication', 6.99, 'Pain Relief', '2025-10-31 00:00:00'),
+('Amoxicillin', 80, 'Antibiotic capsules', 12.99, 'Antibiotics', '2025-09-30 00:00:00'),
+('Vitamin C', 200, 'Immune support supplement', 8.99, 'Vitamins', '2026-01-31 00:00:00'),
+('Calcium', 120, 'Bone health supplement', 9.99, 'Minerals', '2026-03-31 00:00:00'),
+('Aspirin', 120, 'Blood thinner medication', 7.99, 'Pain Relief', '2025-06-30 00:00:00'),
+('Cetirizine', 90, 'Antihistamine tablets', 15.99, 'Allergy', '2025-08-31 00:00:00'),
+('Omeprazole', 60, 'Acid reflux medication', 19.99, 'Digestive Health', '2025-07-31 00:00:00'),
+('Vitamin D3', 200, 'Bone health supplement', 11.99, 'Vitamins', '2026-06-30 00:00:00'),
+('Zinc tablets', 180, 'Immune support mineral', 13.99, 'Minerals', '2026-09-30 00:00:00');
 
 -- Payment data (must be inserted before Orders due to FK constraint)
-INSERT INTO Payment VALUES
-(1, 11.98),
-(2, 20.97),
-(3, 12.99),
-(4, 17.98),
-(5, 39.96),
-(6, 23.97),
-(7, 31.98),
-(8, 19.99),
-(9, 23.98),
-(10, 41.97);
+INSERT INTO Payment (Total_amount) VALUES
+(11.98),
+(20.97),
+(12.99),
+(17.98),
+(39.96),
+(23.97),
+(31.98),
+(19.99),
+(23.98),
+(41.97);
 
 -- Orders data (must be inserted before Shopping_cart due to FK constraint)
-INSERT INTO Orders VALUES
-(1, 'Delivered', '2024-09-23', '2024-09-25 12:00:00', 1, 'john@email.com'),
-(2, 'Shipped', '2024-09-24', '2024-09-26 12:00:00', 2, 'sarah@email.com'),
-(3, 'Processing', '2024-09-25', '2024-09-27 12:00:00', 3, 'mike@email.com'),
-(4, 'Delivered', '2024-09-26', '2024-09-28 12:00:00', 4, 'david@email.com'),
-(5, 'Pending', '2024-09-27', '2024-09-29 12:00:00', 5, 'emma@email.com'),
-(6, 'Shipped', '2024-09-28', '2024-09-30 12:00:00', 6, 'frank@email.com'),
-(7, 'Processing', '2024-09-29', '2024-10-01 12:00:00', 7, 'grace@email.com'),
-(8, 'Delivered', '2024-09-30', '2024-10-02 12:00:00', 8, 'henry@email.com'),
-(9, 'Pending', '2024-10-01', '2024-10-03 12:00:00', 9, 'isabel@email.com'),
-(10, 'Shipped', '2024-10-02', '2024-10-04 12:00:00', 10, 'jack@email.com');
+INSERT INTO Orders (Order_status, Order_date, estimated_delivery_date, Payment_id, Customer_email) VALUES
+('Delivered', '2024-09-23', '2024-09-25 12:00:00', 1, 'john@email.com'),
+('Shipped', '2024-09-24', '2024-09-26 12:00:00', 2, 'sarah@email.com'),
+('Processing', '2024-09-25', '2024-09-27 12:00:00', 3, 'mike@email.com'),
+('Delivered', '2024-09-26', '2024-09-28 12:00:00', 4, 'david@email.com'),
+('Pending', '2024-09-27', '2024-09-29 12:00:00', 5, 'emma@email.com'),
+('Shipped', '2024-09-28', '2024-09-30 12:00:00', 6, 'frank@email.com'),
+('Processing', '2024-09-29', '2024-10-01 12:00:00', 7, 'grace@email.com'),
+('Delivered', '2024-09-30', '2024-10-02 12:00:00', 8, 'henry@email.com'),
+('Pending', '2024-10-01', '2024-10-03 12:00:00', 9, 'isabel@email.com'),
+('Shipped', '2024-10-02', '2024-10-04 12:00:00', 10, 'jack@email.com');
 
 -- Shopping cart data (now with foreign key constraint to Orders)
-INSERT INTO Shopping_cart VALUES
-(1, 1),
-(2, 2),
-(3, 3),
-(4, 4),
-(5, 5),
-(6, 6),
-(7, 7),
-(8, 8),
-(9, 9),
-(10, 10);
+INSERT INTO Shopping_cart (OrderID) VALUES
+(1),
+(2),
+(3),
+(4),
+(5),
+(6),
+(7),
+(8),
+(9),
+(10);
 
 -- Inventory to Shopping Cart relationships with quantity and price
 INSERT INTO Inventory_to_Shopping_Cart VALUES

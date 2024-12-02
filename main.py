@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # Database connection
 class DatabaseConnection:
     def __init__(self):
-        self.server = 'DESKTOP-G8KFEG6\\MYSQLSERVER1'
+        self.server = 'Haris'
         self.database = 'final_project'
         self.connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={self.server};DATABASE={self.database};Trusted_Connection=yes;'
 
@@ -165,19 +165,41 @@ class CustomerDashboard(QtWidgets.QMainWindow):
             conn = db.get_connection()
             cursor = conn.cursor()
 
-            # Update query
-            update_query = "UPDATE Customer SET Customer_name = ?, Address = ? WHERE Customer_email = ?"
-            cursor.execute(update_query, (new_name, new_address, self.customer_email))
-            conn.commit()
+            # Add better transaction handling
+            try:
+                # cursor.execute("BEGIN TRANSACTION")
+                # Update query
+                update_query = "UPDATE Customer SET Customer_name = ?, Address = ? WHERE Customer_email = ?"
+                cursor.execute(update_query, (new_name, new_address, self.customer_email))
 
-            cursor.close()
-            conn.close()
+                if self.radioButton.isChecked():
+                    # Create new order
+                    cursor.execute("""
+                        INSERT INTO Orders (Order_status, Order_date, Customer_email) 
+                        VALUES ('Pending', GETDATE(), ?)
+                    """, (self.customer_email,))
+                    cursor.execute("SELECT @@IDENTITY")  # Use @@IDENTITY instead of IDENT_CURRENT
+                    order_id = cursor.fetchval()
+                        
+                    # Create shopping cart
+                    cursor.execute("INSERT INTO Shopping_cart (OrderID) VALUES (?)", (order_id,))
+                    cursor.execute("SELECT @@IDENTITY")
+                    cart_id = cursor.fetchval()
+
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise e
+            finally:
+                cursor.close()
+                conn.close()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to update customer details: {str(e)}")
         
         if self.radioButton.isChecked():
-            self.order_screen = OrderScreen(self.customer_email)
+            self.order_screen = OrderScreen(self.customer_email, cart_id, order_id)
+
             self.order_screen.show()
         elif self.radioButton_2.isChecked():
             self.tracking_screen = OrderTrackingScreen(self.customer_email)
@@ -271,16 +293,25 @@ class UpdateInventoryScreen(QtWidgets.QMainWindow):
         db = DatabaseConnection()
         conn = db.get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM Inventory")
+        cursor.execute("""
+                SELECT Product_id, Product_name, quantity_in_stock, 
+                       unit_price, category, description, expiration_date 
+                FROM Inventory 
+                WHERE quantity_in_stock > 0;
+            """)
         
         self.tableWidget.clearContents()
         self.tableWidget.setRowCount(0)
         
         for row_index, row_data in enumerate(cursor.fetchall()):
             self.tableWidget.insertRow(row_index)
+            # Set serial number in first column
+            self.tableWidget.setItem(row_index, 0, 
+                                     QTableWidgetItem(str(row_index + 1)))
+            # Add product data starting from column 1
             for col_index, cell_data in enumerate(row_data):
-                self.tableWidget.setItem(row_index, col_index, 
-                                    QTableWidgetItem(str(cell_data)))
+                self.tableWidget.setItem(row_index, col_index + 1, 
+                                         QTableWidgetItem(str(cell_data)))
         conn.close()
 
     def add_new_product(self):
@@ -364,8 +395,8 @@ class UpdateInventoryScreen(QtWidgets.QMainWindow):
             QMessageBox.warning(self, "Warning", "Please select a product to delete")
             return
             
-        product_id = self.tableWidget.item(selected_row, 0).text()
-        product_name = self.tableWidget.item(selected_row, 1).text()
+        product_id = self.tableWidget.item(selected_row, 1).text()  # Get product ID from column 1
+        product_name = self.tableWidget.item(selected_row, 2).text()  # Get product name from column 2
         
         reply = QMessageBox.question(self, "Confirm Delete",
                                    f"Are you sure you want to delete {product_name}?",
@@ -378,17 +409,30 @@ class UpdateInventoryScreen(QtWidgets.QMainWindow):
                 conn = db.get_connection()
                 cursor = conn.cursor()
                 
-                # Delete related records first
+                # Start transaction
+                # cursor.execute("BEGIN TRANSACTION")
+                
+                # Delete from Inventory_to_Shopping_Cart first
+                cursor.execute("DELETE FROM Inventory_to_Shopping_Cart WHERE product_ID = ?", (product_id,))
+                
+                # Delete from Manages table
                 cursor.execute("DELETE FROM Manages WHERE Product_id = ?", (product_id,))
+                
+                # Finally delete from Inventory
                 cursor.execute("DELETE FROM Inventory WHERE Product_id = ?", (product_id,))
                 
+                # Commit the transaction
                 conn.commit()
+                cursor.close()
                 conn.close()
                 
                 self.load_inventory()  # Refresh the table
                 QMessageBox.information(self, "Success", "Product deleted successfully")
+                
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to delete product: {str(e)}")
+            
+                    
 
 # Order management screens
 class UpdateOrderStatusScreen(QtWidgets.QMainWindow):
@@ -403,7 +447,7 @@ class UpdateOrderStatusScreen(QtWidgets.QMainWindow):
         # Set up status combo box options
         self.comboBox.addItems(['Pending', 'Processing', 'Shipped', 'Delivered'])
         # Connect buttons
-        self.pushButton.clicked.connect(self.update_order_status)  # OK button
+        self.pushButton_2.clicked.connect(self.update_order_status)  # OK button
         # Setup date picker
         self.dateEdit.setCalendarPopup(True)
         self.dateEdit.setDate(QDate.currentDate().addDays(2))  # Default to 2 days from now
@@ -434,67 +478,111 @@ class UpdateOrderStatusScreen(QtWidgets.QMainWindow):
         conn = db.get_connection()
         cursor = conn.cursor()
         
+        # Simpler query focusing on order details
         cursor.execute("""
             SELECT o.Order_id, o.Order_status, o.Order_date, 
-                   o.estimated_delivery_date, c.Customer_name,
-                   i.Product_name, isc.item_quantity, i.unit_price,
-                   i.description, i.expiration_date
+                o.estimated_delivery_date, p.Total_amount
             FROM Orders o
-            JOIN Customer c ON o.Customer_email = c.Customer_email
-            JOIN Shopping_cart sc ON o.Order_id = sc.OrderID
-            JOIN Inventory_to_Shopping_Cart isc ON sc.shopping_cart_ID = isc.shopping_cart_ID
-            JOIN Inventory i ON isc.product_ID = i.Product_id
+            LEFT JOIN Payment p ON o.Payment_id = p.Payment_id
+            ORDER BY o.Order_date DESC
         """)
         
         self.tableWidget.clearContents()
         self.tableWidget.setRowCount(0)
+        
+        # Set up table headers
+        headers = ["Order ID", "Status", "Order Date", "Delivery Date", "Amount"]
+        self.tableWidget.setColumnCount(len(headers))
+        self.tableWidget.setHorizontalHeaderLabels(headers)
+        
+        # Populate table
         for row_index, row_data in enumerate(cursor.fetchall()):
             self.tableWidget.insertRow(row_index)
             for col_index, cell_data in enumerate(row_data):
-                self.tableWidget.setItem(row_index, col_index, 
-                                       QTableWidgetItem(str(cell_data)))
+                item = QTableWidgetItem(str(cell_data))
+                self.tableWidget.setItem(row_index, col_index, item)
+        
+        cursor.close()
         conn.close()
 
     def update_order_status(self):
-        order_id = self.lineEdit.text()
-        new_status = self.comboBox.currentText()
-        new_delivery_date = self.dateEdit.date().toString("yyyy-MM-dd")
-        
-        if not order_id:
-            QMessageBox.warning(self, "Error", "Please select an order first")
-            return
-            
         try:
+            # Get values from UI
+            order_id = self.lineEdit.text()
+            new_status = self.comboBox.currentText()
+            new_delivery_date = self.dateEdit.date().toString("yyyy-MM-dd")
+
+            # Validate inputs
+            if not order_id or not new_status or not new_delivery_date:
+                QMessageBox.warning(self, "Error", "Please fill in all fields")
+                return
+
+            # Get current order details to check if there are actual changes
             db = DatabaseConnection()
             conn = db.get_connection()
             cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE Orders 
-                SET Order_status = ?, estimated_delivery_date = ?
-                WHERE Order_id = ?
-            """, (new_status, new_delivery_date, order_id))
-            
-            cursor.execute("""
-                INSERT INTO Updates (Admin_email, Order_id)
-                VALUES (?, ?)
-            """, (self.admin_email, order_id))
-            
-            conn.commit()
-            conn.close()
-            
-            QMessageBox.information(self, "Success", "Order status updated successfully")
-            self.load_orders()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to update order: {str(e)}")
 
+            cursor.execute("""
+                SELECT Order_status, estimated_delivery_date
+                FROM Orders 
+                WHERE Order_id = ?
+            """, (order_id,))
+            
+            current_order = cursor.fetchone()
+            if not current_order:
+                QMessageBox.warning(self, "Error", "Order not found")
+                return
+
+            current_status, current_delivery_date = current_order
+
+            # Only update if there are actual changes
+            if (new_status != current_status or 
+                new_delivery_date != str(current_delivery_date)):
+                
+                # Update order status
+                cursor.execute("""
+                    UPDATE Orders 
+                    SET Order_status = ?, estimated_delivery_date = ?
+                    WHERE Order_id = ?
+                """, (new_status, new_delivery_date, order_id))
+                
+                # Check if update record already exists
+                cursor.execute("""
+                    SELECT 1 FROM Updates 
+                    WHERE Admin_email = ? AND Order_id = ?
+                """, (self.admin_email, order_id))
+
+                if not cursor.fetchone():
+                    # Insert update record only if it doesn't exist
+                    cursor.execute("""
+                        INSERT INTO Updates (Admin_email, Order_id)
+                        VALUES (?, ?)
+                    """, (self.admin_email, order_id))
+                
+                conn.commit()
+                QMessageBox.information(self, "Success", "Order status updated successfully")
+            else:
+                QMessageBox.information(self, "Info", "No changes were made to the order")
+            
+            cursor.close()
+            conn.close()
+            self.load_orders()
+        
+        except Exception as e:
+            print(f"Error updating order: {str(e)}")  # Debug print
+            if 'conn' in locals():
+                conn.rollback()
+                cursor.close()
+                conn.close()
+            QMessageBox.critical(self, "Error", f"Failed to update order: {str(e)}")
 # Customer order-related screens
 class OrderScreen(QtWidgets.QMainWindow):
-    def __init__(self, customer_email):
+    def __init__(self, customer_email, cart_id, order_id):
         super().__init__()
         uic.loadUi('screens/order.ui', self)
         self.customer_email = customer_email
+        self.cart_id = cart_id
+        self.order_id = order_id
         # Remove this line since productsTable already exists from the UI
         # self.productsTable = self.tableWidget
         
@@ -513,28 +601,44 @@ class OrderScreen(QtWidgets.QMainWindow):
         self.pushButton_3.clicked.connect(self.view_cart)  # View cart button
 
     def view_cart(self):
-        self.cart_screen = CartScreen(self.customer_email)
+        self.cart_screen = CartScreen(self.customer_email, self.cart_id, self.order_id)
         self.cart_screen.show()
 
     def load_products(self):
         db = DatabaseConnection()
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM Inventory WHERE quantity_in_stock > 0")
-        
-        self.productsTable.clearContents()
-        self.productsTable.setRowCount(0)  # Reset row count
-        
-        for row_index, row_data in enumerate(cursor.fetchall()):
-            self.productsTable.insertRow(row_index)
-            # Set serial number in first column
-            self.productsTable.setItem(row_index, 0, 
-                                     QTableWidgetItem(str(row_index + 1)))
-            # Add product data starting from column 1
-            for col_index, cell_data in enumerate(row_data):
-                self.productsTable.setItem(row_index, col_index + 1, 
-                                         QTableWidgetItem(str(cell_data)))
-        conn.close()
+        conn = None
+        try:
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            
+            # Add semicolon to end SQL statement
+            cursor.execute("""
+                SELECT Product_id, Product_name, quantity_in_stock, 
+                       unit_price, category, description, expiration_date 
+                FROM Inventory 
+                WHERE quantity_in_stock > 0;
+            """)
+            
+            results = cursor.fetchall()
+            
+            self.productsTable.clearContents()
+            self.productsTable.setRowCount(0)
+            
+            for row_index, row_data in enumerate(results):
+                self.productsTable.insertRow(row_index)
+                # Set serial number in first column
+                self.productsTable.setItem(row_index, 0, 
+                                         QTableWidgetItem(str(row_index + 1)))
+                # Add product data starting from column 1
+                for col_index, cell_data in enumerate(row_data):
+                    self.productsTable.setItem(row_index, col_index + 1, 
+                                             QTableWidgetItem(str(cell_data)))
+        except Exception as e:
+            print(f"Database error: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to load products: {str(e)}")
+        finally:
+            if conn:
+                conn.close()
     
     def add_to_cart(self):
         selected_row = self.productsTable.currentRow()
@@ -542,86 +646,66 @@ class OrderScreen(QtWidgets.QMainWindow):
             QMessageBox.warning(self, "Error", "Please select a product")
             return
             
+        db = DatabaseConnection()
         conn = None
+        cursor = None
         try:
-            # Adjust column indices to account for serial number column
-            product_id = self.productsTable.item(selected_row, 1).text()  # Column 1 instead of 0
+            # Get product details with correct column indices
+            product_id = int(self.productsTable.item(selected_row, 1).text())
             requested_quantity = self.quantitySpinBox.value()
-            available_quantity = int(self.productsTable.item(selected_row, 3).text())  # Column 3 instead of 2
-            unit_price = float(self.productsTable.item(selected_row, 5).text())  # Column 5 instead of 4
+            available_quantity = int(self.productsTable.item(selected_row, 3).text())
+            unit_price = float(self.productsTable.item(selected_row, 4).text())  # Fix column index
             
             if requested_quantity > available_quantity:
                 QMessageBox.warning(self, "Error", f"Only {available_quantity} items available")
                 return
                 
-            db = DatabaseConnection()
             conn = db.get_connection()
             cursor = conn.cursor()
-            
-            # Start transaction
-            cursor.execute("BEGIN TRANSACTION")
-            
-            # Check for existing cart
-            cart_id = cursor.execute("""
-                SELECT sc.shopping_cart_ID 
-                FROM Shopping_cart sc
-                RIGHT OUTER JOIN Orders o ON sc.OrderID = o.Order_id
-                WHERE o.Order_id IS NULL AND o.Customer_email = ?
-            """, (self.customer_email,))
-            
-            
-            
-            if not cart_id:
-                # Create new cart if none exists
-                cursor.execute("""
-                    INSERT INTO Shopping_cart (OrderID) VALUES (NULL);
-                    SELECT SCOPE_IDENTITY();
-                """)
-                cart_id = cursor.fetchone()[0]
-           
-            
-            # Check if product already in cart
-            cursor.execute("""
-                SELECT item_quantity 
-                FROM Inventory_to_Shopping_Cart 
-                WHERE shopping_cart_ID = ? AND product_ID = ?
-            """, (cart_id, product_id))
-            
-            existing_item = cursor.fetchone()
-            
-            if existing_item:
-                # Update quantity if product exists
-                new_quantity = existing_item[0] + requested_quantity
-                cursor.execute("""
-                    UPDATE Inventory_to_Shopping_Cart 
-                    SET item_quantity = ?, Price = ? 
-                    WHERE shopping_cart_ID = ? AND product_ID = ?
-                """, (new_quantity, unit_price * new_quantity, cart_id, product_id))
-            else:
-                # Add new item to cart
+
+            try:
+                # cursor.execute("BEGIN TRANSACTION")
+                
+                # Create new order
+                # cursor.execute("""
+                #     INSERT INTO Orders (Order_status, Order_date, Customer_email) 
+                #     VALUES ('Pending', GETDATE(), ?)
+                # """, (self.customer_email,))
+                # cursor.execute("SELECT @@IDENTITY")  # Use @@IDENTITY instead of IDENT_CURRENT
+                # order_id = cursor.fetchval()
+                
+                # # Create shopping cart
+                # cursor.execute("INSERT INTO Shopping_cart (OrderID) VALUES (?)", (order_id,))
+                # cursor.execute("SELECT @@IDENTITY")
+                # cart_id = cursor.fetchval()
+
+                # Add item to cart
                 cursor.execute("""
                     INSERT INTO Inventory_to_Shopping_Cart 
                     (product_ID, shopping_cart_ID, item_quantity, Price)
                     VALUES (?, ?, ?, ?)
-                """, (product_id, cart_id, requested_quantity, unit_price * requested_quantity))
-            
-            # Update inventory quantity
-            cursor.execute("""
-                UPDATE Inventory 
-                SET quantity_in_stock = quantity_in_stock - ? 
-                WHERE Product_id = ?
-            """, (requested_quantity, product_id))
-            
-            conn.commit()
-            conn.close()
-            
-            QMessageBox.information(self, "Success", "Item added to cart")
-            self.load_products()  # Refresh product list
-            
-        except Exception as e:
-            if conn:
+                """, (product_id, self.cart_id, requested_quantity, unit_price * requested_quantity))
+                
+                # Update inventory
+                cursor.execute("""
+                    UPDATE Inventory 
+                    SET quantity_in_stock = quantity_in_stock - ? 
+                    WHERE Product_id = ?
+                """, (requested_quantity, product_id))
+                
+                conn.commit()
+
+                QMessageBox.information(self, "Success", "Item added to cart")
+
+            except Exception as e:
                 conn.rollback()
+                raise e
+            finally:
+               
+                cursor.close()
                 conn.close()
+
+        except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to add item: {str(e)}")
 
     def search_products(self):
@@ -647,10 +731,12 @@ class OrderScreen(QtWidgets.QMainWindow):
             conn.close()
 
 class CartScreen(QtWidgets.QMainWindow):
-    def __init__(self, customer_email):
+    def __init__(self, customer_email, cart_id, order_id):
         super().__init__()
         uic.loadUi('screens/cart.ui', self)
         self.customer_email = customer_email
+        self.cart_id = cart_id
+        self.order_id = order_id
          # Add this line to map the widget
         self.load_cart()
         self.setup_connections()
@@ -660,14 +746,12 @@ class CartScreen(QtWidgets.QMainWindow):
         conn = db.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT i.Product_id, i.Product_name, isc.item_quantity, 
-                   i.unit_price, (isc.item_quantity * i.unit_price) as Total
-            FROM Shopping_cart sc
-            JOIN Inventory_to_Shopping_Cart isc ON sc.shopping_cart_ID = isc.shopping_cart_ID
-            JOIN Inventory i ON isc.product_ID = i.Product_id
-            JOIN Orders o ON sc.OrderID = o.Order_id
-            WHERE o.Customer_email = ?
-        """, (self.customer_email,))
+        SELECT i.Product_id, i.Product_name, isc.item_quantity, 
+               i.description, i.expiration_date, (isc.item_quantity * i.unit_price) as Total
+        FROM Inventory_to_Shopping_Cart isc
+        JOIN Inventory i ON isc.product_ID = i.Product_id
+        WHERE isc.shopping_cart_ID = ?
+    """, (self.cart_id,))
         
         self.cartTable.clearContents()
         for row_index, row_data in enumerate(cursor.fetchall()):
@@ -682,7 +766,7 @@ class CartScreen(QtWidgets.QMainWindow):
         self.pushButton_2.clicked.connect(self.proceed_to_checkout)  # Proceed to payment button
 
     def proceed_to_checkout(self):
-        self.payment_screen = PaymentScreen(self.customer_email)
+        self.payment_screen = PaymentScreen(self.customer_email, self.cart_id, self.order_id)
         self.payment_screen.show()
 
     def delete_item(self):
@@ -696,18 +780,23 @@ class CartScreen(QtWidgets.QMainWindow):
                 cursor = conn.cursor()
                 cursor.execute("""
                     DELETE FROM Inventory_to_Shopping_Cart 
-                    WHERE product_ID = ? AND shopping_cart_ID IN (
-                        SELECT sc.shopping_cart_ID 
-                        FROM Shopping_cart sc
-                        JOIN Orders o ON sc.OrderID = o.Order_id
-                        WHERE o.Customer_email = ?
-                    )
-                """, (product_id, self.customer_email))
+                    WHERE product_ID = ? AND shopping_cart_ID = ?
+                """, (product_id, self.cart_id))
                 
+                # Optionally, update inventory to add back the quantity
+                # Get the quantity that was removed
+                removed_quantity = int(self.cartTable.item(selected_row, 2).text())
+                cursor.execute("""
+                    UPDATE Inventory 
+                    SET quantity_in_stock = quantity_in_stock + ? 
+                    WHERE Product_id = ?
+                """, (removed_quantity, product_id))
+
                 conn.commit()
                 conn.close()
-                
+
                 self.load_cart()  # Refresh cart view
+                QMessageBox.information(self, "Success", "Item deleted from cart")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to delete item: {str(e)}")
 
@@ -807,14 +896,21 @@ class CreateAccount(QtWidgets.QMainWindow):
                 QMessageBox.warning(self, "Error", "Email already registered")
                 return
 
-            # Insert new customer
-            cursor.execute("""
-                INSERT INTO Customer (Customer_email, Customer_name, password, Address, Contact_no)
-                VALUES (?, ?, ?, ?, ?)
-            """, (email, full_name, password, address, contact))
-            
-            conn.commit()
-            conn.close()
+            # Add better transaction handling
+            try:
+                cursor.execute("BEGIN TRANSACTION")
+                # Insert new customer
+                cursor.execute("""
+                    INSERT INTO Customer (Customer_email, Customer_name, password, Address, Contact_no)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (email, full_name, password, address, contact))
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise e
+            finally:
+                cursor.close()
+                conn.close()
 
             QMessageBox.information(self, "Success", "Account created successfully")
             self.login_screen = CustomerLogin()
@@ -826,10 +922,12 @@ class CreateAccount(QtWidgets.QMainWindow):
 
 # Add PaymentScreen class
 class PaymentScreen(QtWidgets.QMainWindow):
-    def __init__(self, customer_email):
+    def __init__(self, customer_email, cart_id, order_id):
         super().__init__()
         uic.loadUi('screens/payment.ui', self)
         self.customer_email = customer_email
+        self.cart_id = cart_id
+        self.order_id = order_id 
         self.setup_ui()
 
     def setup_ui(self):
@@ -859,20 +957,29 @@ class PaymentScreen(QtWidgets.QMainWindow):
             conn = db.get_connection()
             cursor = conn.cursor()
             
-            # Create payment record
-            total = float(self.lineEdit_3.text())
-            cursor.execute("INSERT INTO Payment (Total_amount) VALUES (?)", (total,))
-            cursor.execute("SELECT @@IDENTITY")  # Get last inserted payment ID
-            payment_id = cursor.fetchone()[0]
-            
-            # Create order
-            cursor.execute("""
-                INSERT INTO Orders (Order_status, Order_date, estimated_delivery_date, Payment_id, Customer_email)
-                VALUES (?, GETDATE(), DATEADD(day, 2, GETDATE()), ?, ?)
-            """, ('Pending', payment_id, self.customer_email))
-            
-            conn.commit()
-            conn.close()
+            # Add better transaction handling
+            try:
+                # cursor.execute("BEGIN TRANSACTION")
+                # Create payment record
+                total = float(self.lineEdit_3.text())
+                cursor.execute("INSERT INTO Payment (Total_amount) VALUES (?)", (total,))
+                cursor.execute("SELECT @@IDENTITY")
+                payment_id = cursor.fetchval()
+                
+                # Create order
+                cursor.execute("""
+                UPDATE Orders
+                SET Payment_id = ?, estimated_delivery_date = DATEADD(day, 2, GETDATE())
+                WHERE Order_id = ?
+                """, (payment_id, self.order_id))
+                
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise e
+            finally:
+                cursor.close()
+                conn.close()
             
             QMessageBox.information(self, "Success", "Payment processed successfully")
             self.close()
@@ -888,7 +995,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-

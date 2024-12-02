@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # Database connection
 class DatabaseConnection:
     def __init__(self):
-        self.server = 'Haris'
+        self.server = 'DESKTOP-G8KFEG6\\MYSQLSERVER1'
         self.database = 'final_project'
         self.connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={self.server};DATABASE={self.database};Trusted_Connection=yes;'
 
@@ -202,8 +202,8 @@ class CustomerDashboard(QtWidgets.QMainWindow):
 
             self.order_screen.show()
         elif self.radioButton_2.isChecked():
-            self.tracking_screen = OrderTrackingScreen(self.customer_email)
-            self.tracking_screen.show()
+            self.selection_screen = SelectOrderScreen(self.customer_email)
+            self.selection_screen.show()
         elif self.radioButton_3.isChecked():
             self.cart_screen = CartScreen(self.customer_email)
             self.cart_screen.show()
@@ -800,22 +800,68 @@ class CartScreen(QtWidgets.QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to delete item: {str(e)}")
 
-class OrderTrackingScreen(QtWidgets.QMainWindow):
+class SelectOrderScreen(QtWidgets.QMainWindow):
     def __init__(self, customer_email):
         super().__init__()
-        uic.loadUi('screens/orderstatus.ui', self)
+        uic.loadUi('screens/select_order_id.ui', self)
         self.customer_email = customer_email
         self.setup_ui()
         self.load_orders()
 
     def setup_ui(self):
-        # Match widgets from orderstatus.ui
-        self.pushButton.clicked.connect(self.close)  # Close button
-        self.lineEdit.setEnabled(False)  # Order ID field
-        self.lineEdit_2.setEnabled(False)  # Expected delivery date field
-        self.comboBox.setEnabled(False)  # Status combobox
+        self.pushButton.clicked.connect(self.proceed_to_tracking)
+        self.comboBox.setPlaceholderText("Select Order ID")
 
     def load_orders(self):
+        try:
+            db = DatabaseConnection()
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT Order_id 
+                FROM Orders 
+                WHERE Customer_email = ?
+                ORDER BY Order_date DESC
+            """, (self.customer_email,))
+            
+            orders = cursor.fetchall()
+            if orders:
+                self.comboBox.clear()
+                for order in orders:
+                    self.comboBox.addItem(str(order[0]))
+            else:
+                QMessageBox.information(self, "Info", "No orders found")
+                self.close()
+            
+            conn.close()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load orders: {str(e)}")
+
+    def proceed_to_tracking(self):
+        selected_order = self.comboBox.currentText()
+        if selected_order:
+            self.tracking_screen = OrderTrackingScreen(self.customer_email, selected_order)
+            self.tracking_screen.show()
+            self.close()
+        else:
+            QMessageBox.warning(self, "Error", "Please select an order")
+
+class OrderTrackingScreen(QtWidgets.QMainWindow):
+    def __init__(self, customer_email, order_id):
+        super().__init__()
+        uic.loadUi('screens/orderstatus.ui', self)
+        self.customer_email = customer_email
+        self.order_id = order_id
+        self.setup_ui()
+        self.load_order()
+
+    def setup_ui(self):
+        self.pushButton.clicked.connect(self.close)
+        self.lineEdit.setEnabled(False)
+        self.lineEdit_2.setEnabled(False)
+        self.comboBox.setEnabled(False)
+
+    def load_order(self):
         db = DatabaseConnection()
         conn = db.get_connection()
         cursor = conn.cursor()
@@ -823,15 +869,14 @@ class OrderTrackingScreen(QtWidgets.QMainWindow):
             SELECT o.Order_id, o.Order_status, o.Order_date, 
                    o.estimated_delivery_date
             FROM Orders o
-            WHERE o.Customer_email = ?
-        """, (self.customer_email,))
+            WHERE o.Customer_email = ? AND o.Order_id = ?
+        """, (self.customer_email, self.order_id))
 
         result = cursor.fetchone()
         if result:
-            # Display the most recent order details
-            self.lineEdit.setText(str(result[0]))  # Order ID
-            self.comboBox.addItem(str(result[1]))  # Status
-            self.lineEdit_2.setText(str(result[3]))  # Expected delivery date
+            self.lineEdit.setText(str(result[0]))
+            self.comboBox.addItem(str(result[1]))
+            self.lineEdit_2.setText(str(result[3]))
 
         conn.close()
 
@@ -898,20 +943,20 @@ class CreateAccount(QtWidgets.QMainWindow):
 
             # Add better transaction handling
             try:
-                cursor.execute("BEGIN TRANSACTION")
+                # cursor.execute("BEGIN TRANSACTION")
                 # Insert new customer
                 cursor.execute("""
                     INSERT INTO Customer (Customer_email, Customer_name, password, Address, Contact_no)
                     VALUES (?, ?, ?, ?, ?)
                 """, (email, full_name, password, address, contact))
                 conn.commit()
-            except Exception as e:
-                conn.rollback()
-                raise e
-            finally:
                 cursor.close()
                 conn.close()
 
+            except Exception as e:
+                raise e
+            
+                
             QMessageBox.information(self, "Success", "Account created successfully")
             self.login_screen = CustomerLogin()
             self.login_screen.show()

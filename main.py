@@ -940,13 +940,23 @@ class PaymentScreen(QtWidgets.QMainWindow):
         conn = db.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT SUM(i.unit_price * sc.Quantity) as Total
-            FROM Shopping_cart sc
-            JOIN Inventory i ON sc.Product_id = i.Product_id
-            WHERE sc.Customer_email = ?
-        """, (self.customer_email,))
-        
+        SELECT SUM(isc.item_quantity * i.unit_price) as Total
+        FROM Inventory_to_Shopping_Cart isc
+        JOIN Inventory i ON isc.product_ID = i.Product_id
+        WHERE isc.shopping_cart_ID = ?
+        """, (self.cart_id,))
         total = cursor.fetchone()[0]
+        
+         # Get payment ID associated with the order
+        cursor.execute("""
+        SELECT Payment_id FROM Orders WHERE Order_id = ?
+        """, (self.order_id,))
+        payment_id = cursor.fetchone()[0]
+
+        self.lineEdit.setText(str(self.order_id))  # Order ID
+        self.lineEdit.setEnabled(False)
+        self.lineEdit_2.setText(str(payment_id))  # Payment ID
+        self.lineEdit_2.setEnabled(False)  # Make read-only
         self.lineEdit_3.setText(str(total))  # Total amount
         self.lineEdit_3.setEnabled(False)  # Make read-only
         conn.close()

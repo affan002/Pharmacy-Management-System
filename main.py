@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 # Database connection
 class DatabaseConnection:
     def __init__(self):
-        self.server = 'DESKTOP'
-        self.database = 'final_project'
+        self.server = '' 
+        self.database = 'final_project' 
         self.connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={self.server};DATABASE={self.database};Trusted_Connection=yes;'
 
     def get_connection(self):
@@ -432,8 +432,6 @@ class UpdateInventoryScreen(QtWidgets.QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to delete product: {str(e)}")
             
-                    
-
 # Order management screens
 class UpdateOrderStatusScreen(QtWidgets.QMainWindow):
     def __init__(self, admin_email):
@@ -575,6 +573,7 @@ class UpdateOrderStatusScreen(QtWidgets.QMainWindow):
                 cursor.close()
                 conn.close()
             QMessageBox.critical(self, "Error", f"Failed to update order: {str(e)}")
+
 # Customer order-related screens
 class OrderScreen(QtWidgets.QMainWindow):
     def __init__(self, customer_email, cart_id, order_id):

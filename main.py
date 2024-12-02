@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # Database connection
 class DatabaseConnection:
     def __init__(self):
-        self.server = 'DESKTOP-G8KFEG6\\MYSQLSERVER1'
+        self.server = 'DESKTOP'
         self.database = 'final_project'
         self.connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={self.server};DATABASE={self.database};Trusted_Connection=yes;'
 
@@ -172,7 +172,7 @@ class CustomerDashboard(QtWidgets.QMainWindow):
                 update_query = "UPDATE Customer SET Customer_name = ?, Address = ? WHERE Customer_email = ?"
                 cursor.execute(update_query, (new_name, new_address, self.customer_email))
 
-                if self.radioButton.isChecked():
+                if self.radioButton.isChecked() or self.radioButton_3.isChecked():
                     # Create new order
                     cursor.execute("""
                         INSERT INTO Orders (Order_status, Order_date, Customer_email) 
@@ -205,7 +205,7 @@ class CustomerDashboard(QtWidgets.QMainWindow):
             self.selection_screen = SelectOrderScreen(self.customer_email)
             self.selection_screen.show()
         elif self.radioButton_3.isChecked():
-            self.cart_screen = CartScreen(self.customer_email)
+            self.cart_screen = CartScreen(self.customer_email, cart_id, order_id)
             self.cart_screen.show()
 
     def on_radio_selected(self):
@@ -1000,8 +1000,13 @@ class PaymentScreen(QtWidgets.QMainWindow):
 
         self.lineEdit.setText(str(self.order_id))  # Order ID
         self.lineEdit.setEnabled(False)
-        self.lineEdit_2.setText(str(payment_id))  # Payment ID
-        self.lineEdit_2.setEnabled(False)  # Make read-only
+        
+        if  not payment_id:
+            self.lineEdit_2.setText(str(self.order_id))  # Payment ID
+            self.lineEdit_2.setEnabled(False)
+        else:
+            self.lineEdit_2.setText(str(payment_id))  # Payment ID
+            self.lineEdit_2.setEnabled(False)  # Make read-only
         self.lineEdit_3.setText(str(total))  # Total amount
         self.lineEdit_3.setEnabled(False)  # Make read-only
         conn.close()
